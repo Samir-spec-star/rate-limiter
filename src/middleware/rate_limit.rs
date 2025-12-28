@@ -32,13 +32,10 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Response<Body> {
     let client_id = extract_client_id(&request);
-    // Step 2: Check rate limit
     let result = state.limiter.check(&client_id).await;
-    // Step 3: Build rate limit headers
     let limit_header = result.remaining + if result.allowed { 1 } else { 0 };
 
     if result.allowed {
-        // Step 4a: Request allowed - continue to route handler
         let mut response = next.run(request).await;
 
         // Add rate limit headers to response
@@ -54,14 +51,16 @@ pub async fn rate_limit_middleware(
 
         response
     } else {
-        // Step 4b: Rate limited - return 429 immediately
         let mut response = Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .body(Body::from("Rate limit exceeded. Please try again later."))
             .expect("response build");
         // Add rate limit headers
         let headers = response.headers_mut();
-        headers.insert("X-RateLimit-Limit", limit_header.to_string().parse().expect("valid header"));
+        headers.insert(
+            "X-RateLimit-Limit",
+            limit_header.to_string().parse().expect("valid header"),
+        );
         headers.insert("X-RateLimit-Remaining", "0".parse().expect("valid header"));
         headers.insert(
             "Retry-After",
@@ -76,17 +75,10 @@ pub async fn rate_limit_middleware(
     }
 }
 /// Extract a client identifier from the request
-/// In production, use: client IP, API key header, or JWT token
-  fn extract_client_id(request: &Request<Body>) -> String {
-    // Try to get client IP from headers (for proxied requests)
-    if let Some(forwarded) = request.headers().get("X-Forwarded-For") {
-        if let Ok(ip) = forwarded.to_str() {
-            return ip.split(',').next().unwrap_or("unknown").trim().to_string();
-        }
+fn extract_client_id(request: &Request<Body>) -> &'static str {
+    if request.headers().get("X-Forwarded-For").is_some() {
     }
-
-    // Fallback: use a default key (in production, get real IP)
-    "default_client".to_string()
+    "default_client"
 }
 // Type alias for cleaner code
 pub type RateLimitLayer = axum::middleware::FromFnLayer<
@@ -125,7 +117,16 @@ pub async fn redis_rate_limit_middleware(
     if result.allowed {
         let mut response = next.run(request).await;
         let headers = response.headers_mut();
-        headers.insert("X-RateLimit-Limit", state.limiter.config.max_request.to_string().parse().expect("valid header"));
+        headers.insert(
+            "X-RateLimit-Limit",
+            state
+                .limiter
+                .config
+                .max_request
+                .to_string()
+                .parse()
+                .expect("valid header"),
+        );
         headers.insert(
             "X-RateLimit-Remaining",
             result.remaining.to_string().parse().expect("valid header"),
@@ -137,8 +138,20 @@ pub async fn redis_rate_limit_middleware(
             .body(Body::from("Rate limit exceeded."))
             .expect("response build ");
         let headers = response.headers_mut();
-        headers.insert("X-RateLimit-Limit", state.limiter.config.max_request.to_string().parse().expect("valid header"));
-        headers.insert("X-RateLimit-Remaining", result.remaining.to_string().parse().expect("valid header"));
+        headers.insert(
+            "X-RateLimit-Limit",
+            state
+                .limiter
+                .config
+                .max_request
+                .to_string()
+                .parse()
+                .expect("valid header"),
+        );
+        headers.insert(
+            "X-RateLimit-Remaining",
+            result.remaining.to_string().parse().expect("valid header"),
+        );
         headers.insert(
             "Retry-After",
             result
